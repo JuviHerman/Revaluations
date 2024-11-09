@@ -34,12 +34,12 @@ def predict(model: ModelData,
 def main():
 
     #  create monthly equations using golden distribution
-    golden_distribution_df = pd.read_csv('data/data_for_convex.csv').drop('Unnamed: 0', axis=1)
+    golden_distribution_df = pd.read_csv('data/preprocessed/data_for_convex.csv').drop('Unnamed: 0', axis=1)
     golden_distribution_df.rename(columns={'RankID1': 'RankID'}, inplace=True)
     model = load(data=golden_distribution_df)
 
     #  predict the latest duration/rnpd per Security on last month's model (and save results)
-    full_data = pd.read_csv('data/full_data_for_convex.csv').drop('Unnamed: 0', axis=1)
+    full_data = pd.read_csv('data/preprocessed/full_data_for_convex.csv').drop('Unnamed: 0', axis=1)
     results = predict(model=model,
                       df=full_data)
     #  save to file

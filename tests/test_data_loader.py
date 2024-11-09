@@ -51,7 +51,7 @@ def testing_getting_model_scores(data: pd.DataFrame):
 
 
 def main():
-    data = pd.read_csv('../data/data_for_convex.csv').drop('Unnamed: 0',axis=1)
+    data = pd.read_csv('../data/preprocessed/data_for_convex.csv').drop('Unnamed: 0', axis=1)
     data.rename(columns={'RankID1':'RankID'},inplace=True)
     # testing_checking_pipe(data)  #  check few months to see the class/ mean_rnpd making sense
     testing_loading_to_convex(data)  # check convex works
