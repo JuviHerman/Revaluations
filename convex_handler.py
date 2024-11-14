@@ -40,8 +40,10 @@ def main():
 
     #  predict the latest duration/rnpd per Security on last month's model (and save results)
     full_data = pd.read_csv('data/preprocessed/full_data_for_convex.csv').drop('Unnamed: 0', axis=1)
-    results = predict(model=model,
-                      df=full_data)
+    results = predict(
+        model=model,
+        df=full_data
+    )
     #  save to file
     results.to_csv('~/Desktop/predicted_data.csv')
 
