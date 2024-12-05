@@ -14,7 +14,7 @@ REQUIRED_SAMPLES = {1:20,
 
 EXPECTED_DATA_COLUMNS = ['month', 'M',
                          'YieldBruto', 'Net Hazard Rate AMI',
-                         'ZSpread', 'SecurityID', 'y', 'RankID', 'x']
+                         'ZSpread', 'SecurityID', 'Duration', 'RankID', 'Rnpd']
 
 RNPD_EQUATION_POLY_DEGREE = 2
 

@@ -51,7 +51,7 @@ class ModelData:
             for duration_index, duration_class in sorted(m_class.durations.items()):
                 d = {'group_index': group_index,
                      'duration_index': duration_index,
-                     'rnpd': np.median([sample.y for sample in duration_class.samples])
+                     'rnpd': np.median([sample.rnpd for sample in duration_class.samples])
                      }
                 df.append(d)
         if len(df) > 0:
@@ -82,7 +82,7 @@ class ModelData:
         try:
             pred_model = self.models[month]
             if pred_model:
-                return data.apply(lambda x: pred_model.get_matching_group(x['x'], x['y']), axis=1)
+                return data.apply(lambda x: pred_model.get_matching_group(x['Duration'], x['Rnpd']), axis=1)
         except KeyError:
             print(f'Month {month} was not calculated for a model')
 

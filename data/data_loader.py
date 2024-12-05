@@ -2,7 +2,7 @@ import logging
 import pandas as pd
 import numpy as np
 from typing import Optional
-from const import (PROSPECTUS_COLUMNS, RANKED_DATA_RELEVANT_COLUMNS,
+from data.const import (PROSPECTUS_COLUMNS, RANKED_DATA_RELEVANT_COLUMNS, HAZARD_RATE_COL,
                    AMIHOOD_LIQUIDITY_COLUMN, RANK_COLUMN, GOLDEN_DISTRIBUTION_FILTER_COLUMNS,
                    GOLDEN_DISTRIBUTION_CONDITIONS, GOV_FILE_PATH, SEC_FILE_PATH, PROSPECTUS_FILE,
                    GOV_SAMPLE_SIZE
@@ -15,27 +15,42 @@ import matplotlib.pyplot as plt
 class Loader:
 
     def __init__(self):
-        self.secs: Optional[pd.DataFrame]
-        self.gov: Optional[pd.DataFrame]
-        self.full_dataset: Optional[pd.DataFrame]
+        self.secs: Optional[pd.DataFrame] = None
+        self.gov: Optional[pd.DataFrame] = None
+        self.full_dataset: Optional[pd.DataFrame] = None
         self.is_loading_successful: bool = False
         self.is_prospectus_updated: bool = False
         self.is_liquidity_calculated: bool = False
         self.is_net_hazard_rate_updated: bool = False
 
     def load_ranked_data(self,
-                         gov_file_path: str,
-                         sec_file_apath: str)\
-            -> [pd.DataFrame, pd.DataFrame]:
+                         gov_file_path: str = GOV_FILE_PATH,
+                         sec_file_apath: str = SEC_FILE_PATH)\
+    -> [pd.DataFrame, pd.DataFrame]:
         try:
-            secs = pd.read_excel(gov_file_path)
-            gov = pd.read_excel(sec_file_apath)
+            secs = pd.read_excel(sec_file_apath)
+            gov = pd.read_excel(gov_file_path)
 
-            # set ranks from originals columns according to business logic
-            secs['RankID1'] = secs['MidroogSecurityRankID']
-            secs['RankID2'] = secs['MaalotSecurityRankID']
-            gov['RankID1'] = 1
-            gov['RankID2'] = 1
+            '''set ranks from originals columns according to business logic (gov = best rank = 1)'''
+
+            secs['RankID'] = secs[RANK_COLUMN]
+            gov['RankID'] = 1
+
+            ''' 
+            filtering rows with null value - all required for RNPD:
+            #   1. RankID - between 1-28
+            #   2. HAZARD_RATE per-calculated
+            #   3. liquidity score
+            '''
+
+            gov = gov[(~gov[HAZARD_RATE_COL].isnull()) &
+                      (~gov[AMIHOOD_LIQUIDITY_COLUMN].isnull())]
+
+            secs = secs[(~secs[RANK_COLUMN].isnull()) &
+                        (~secs[HAZARD_RATE_COL].isnull()) &
+                        (~secs[AMIHOOD_LIQUIDITY_COLUMN].isnull())]
+
+            '''fetch relevant columns only'''
 
             self.secs = secs[RANKED_DATA_RELEVANT_COLUMNS]
             self.gov = gov[RANKED_DATA_RELEVANT_COLUMNS]
@@ -46,8 +61,8 @@ class Loader:
 
 
     def add_prospectus_data(self,
-                            prospectus_path: str,
-                            sheet_name: str):
+                            prospectus_path: str = PROSPECTUS_FILE['path'],
+                            sheet_name: str = PROSPECTUS_FILE['sheet']):
 
         try:
             secs = self.secs.copy()
@@ -86,21 +101,24 @@ class Loader:
 
     def add_liquidity_premium(self):
         try:
+            # add liquidity
             secs = self.secs.copy()
-            secs['RankGroup'] = np.where(secs[RANK_COLUMN].between(1, 5), 1,
-                                    np.where(secs[RANK_COLUMN].between(6, 10), 2, 3))
+            secs['RankGroup'] = np.where(secs['RankID'].between(1, 5), 1,
+                                    np.where(secs['RankID'].between(6, 10), 2, 3))
             secs['month'] = secs['ReportDate'].dt.to_period('M')
             ami_means = Loader.get_ami_means(secs)
-            secs['liquidity_premium_ami'] = secs.set_index(['RankGroup', 'month']).index.map(ami_means)
-            secs.fillna({'liquidity_premium_ami': 0}, inplace=True)
+            secs['liquidity_premium_ami'] = secs.set_index(['RankGroup', 'month']).index.map(ami_means).fillna(0)
             secs['liquidity_premium_ami'] = np.clip(secs['liquidity_premium_ami'], 0, None)
             secs.drop('RankGroup', axis=1, inplace=True)
             self.secs = secs
             self.is_liquidity_calculated = True
-            self.secs['Net Hazard Rate'] = self.secs['HR'] - self.secs['liquidity_premium_ami']
+
+            # build net hazard rate
+            self.secs['Net Hazard Rate'] = self.secs[HAZARD_RATE_COL] - self.secs['liquidity_premium_ami']
             self.is_net_hazard_rate_updated = True
+
             #  fill value in new columns in gov as well
-            self.gov['Net Hazard Rate'] = self.gov['HR']
+            self.gov['Net Hazard Rate'] = self.gov[HAZARD_RATE_COL]
             self.gov['month'] = self.gov['ReportDate'].dt.to_period('M')
 
         except Exception as e:
@@ -111,10 +129,9 @@ class Loader:
             self.gov['GuaranteeID'] = 0
             self.gov['NegativePledgeID'] = 0
             self.gov['SeniorityID'] = 1
+
             self.full_dataset = pd.concat([self.gov.sample(GOV_SAMPLE_SIZE, replace=True),
                                            self.secs]).dropna(subset=['DurationBruto','Net Hazard Rate'])
-            self.gov = None
-            self.secs = None
 
         except Exception as e:
             logging.error("Error occurred during concatenation gov and secs to a full dataframe: %s", e)
@@ -123,9 +140,9 @@ class Loader:
     def calculate_rnpd(self):
         try:
             self.full_dataset['M'] =\
-                np.where(self.full_dataset[RANK_COLUMN].between(12, 23), 11,
-                  np.where(self.full_dataset[RANK_COLUMN] >= 24, 12,
-                    self.full_dataset[RANK_COLUMN]))
+                np.where(self.full_dataset['RankID'].between(12, 23), 11,
+                  np.where(self.full_dataset['RankID'] >= 24, 12,
+                    self.full_dataset['RankID']))
 
             rnpd_dictionary = self.full_dataset.groupby(['SecurityID', 'month']).apply(lambda x: \
                 1 - np.exp(-x['Net Hazard Rate'].mean() / 10), include_groups=False)
@@ -134,8 +151,8 @@ class Loader:
                 (lambda x: rnpd_dictionary[(x.SecurityID, x.month)], axis=1)
 
             #  override protocol definitions in this calculation
-            self.full_dataset.loc[self.full_dataset[RANK_COLUMN] == 1, 'RNPD'] = 0  #  gov
-            self.full_dataset.loc[self.full_dataset[RANK_COLUMN] >= 24, 'RNPD'] = 1  # defaulted
+            self.full_dataset.loc[self.full_dataset['RankID'] == 1, 'RNPD'] = 0  #  gov
+            self.full_dataset.loc[self.full_dataset['RankID'] >= 24, 'RNPD'] = 1  # defaulted
 
             print(self.full_dataset.shape)
             self.full_dataset['RNPD'].plot.hist(bins=30, title='RNPD')
