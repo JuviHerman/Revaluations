@@ -1,8 +1,12 @@
+from abc import abstractmethod
+
 import pandas as pd
 import numpy as np
 import cvxpy as cvx
 import matplotlib.pyplot as plt
-from const import RNPD_EQUATION_POLY_DEGREE, CONVEX_EPSILON_BETWEEN_GROUPS
+from cvxpy import Expression
+
+from const import RNPD_EQUATION_POLY_DEGREE, CONVEX_EPSILON_BETWEEN_GROUPS, LAMBDA_REG
 from typing import List, Optional, Dict
 
 
@@ -32,6 +36,7 @@ class RnpdEquation:
     def __repr__(self):
         return f"RnpdEquation(month='{self.month}')"
 
+
     def fit_polynomial_regression(self, epsilon=CONVEX_EPSILON_BETWEEN_GROUPS):
         # Define variables for polynomial coefficients
         degree = self.poly_degree
@@ -39,15 +44,22 @@ class RnpdEquation:
 
         # Polynomial function
         poly = lambda coef, duration: sum([coef[i] * duration ** i for i in range(degree + 1)])
-
-        # Calculate the error terms (L1 norm) for each group
-        errors = []
+        # Second derivative function
+        second_derivative = lambda coef, x: sum([i * (i - 1) * coef[i] * x ** (i - 2) for i in range(2, degree + 1)])
+        
+        # Total error in cvx terms
+        total_data_error = []
+        regularization_terms = []
         for group in sorted(self.groups.keys()):
-            errors.append(cvx.norm1(self.groups[group]['rnpd'].values -
+
+            # Calculate the error terms (L1 norm) for each group
+            total_data_error.append(cvx.norm1(self.groups[group]['rnpd'].values -
                                     poly(coefficients[group], self.groups[group]['duration_index'].values))
                           )
-        # Total error
-        total_error = sum(errors)
+            # L1 norm of the coefficient vector
+            regularization_terms.append(cvx.norm1(coefficients[group]))
+
+        total_error: Expression = cvx.sum(total_data_error) + cvx.sum(LAMBDA_REG * sum(regularization_terms))
 
         # Constraints for non-intersecting lines
         x_vals = np.linspace(0, 10, 100)
@@ -59,11 +71,13 @@ class RnpdEquation:
             for x in x_vals:
                 constraints.append(poly(coefficients[group_next], x) - poly(coefficients[group_current], x) >= epsilon)
 
-        # Constraints to ensure RNPD is between 0 and 1
         for group in sorted_groups:
             for x in x_vals:
+                # Constraints to ensure RNPD is between 0 and 1
                 constraints.append(poly(coefficients[group], x) <= 1)
                 constraints.append(poly(coefficients[group], x) >= 0)
+                # Second derivative >= 0
+                constraints.append(second_derivative(coefficients[group], x) >= 0)
 
         # Solve the problem
         problem = cvx.Problem(cvx.Minimize(total_error), constraints)
@@ -85,7 +99,7 @@ class RnpdEquation:
         return np.argmin(closest_group) + 1
 
 
-    def plot_graphs(self):
+    def plot_graphs(self, month):
         if self.coeffs is None:
             raise ValueError("Coefficients are not computed. Please run fit_polynomial_regression first.")
 
@@ -100,7 +114,7 @@ class RnpdEquation:
 
         plt.ylabel('RNPD')
         plt.xlabel('Duration Index')
-        plt.title('Polynomial Regression for Risk Groups')
+        plt.title(f'{month} - Polynomial Regression for Risk Groups')
         plt.legend(loc='upper right')
         plt.show()
 
