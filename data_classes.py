@@ -2,14 +2,14 @@ import pandas as pd
 from typing import List, Optional, Dict
 from datetime import datetime
 from const import REQUIRED_SAMPLES
-from collections import defaultdict
+
 
 class Sample:
     def __init__(self, month: datetime.date, group: int, rnpd: float, duration: int):
         self.month = month
         self.group = group # ranging between 1-12 possible groups(M)
         self.rnpd = rnpd  #  rnpd calculated before in the pipeline
-        self.duration = duration  # rounded value of DurationBruto
+        self.duration = duration  # rounded monthly value of DurationBruto
 
 
 class Duration:
@@ -17,25 +17,23 @@ class Duration:
         self.group = group
         self.duration = duration
         self.samples = []
-        self.update_multiple_items(samples)
+        self.set_multiple_samples(samples)
 
-    def update_one_item(self, sample: Sample):
+    def get_oldest_sample(self) -> Optional[Sample]:
+        return min(self.samples, key=lambda sample: sample.month) if self.samples else None
+
+    def set_new_sample(self, sample: Sample):
         if len(self.samples) < REQUIRED_SAMPLES[self.group]:
             self.samples.append(sample)
         else:
-            # find the oldest sample in group/duration and replace it:
-            oldest_sample: Optional[Sample] = None
-            for s in self.samples:
-                if oldest_sample is None or s.month < oldest_sample.month:
-                    oldest_sample = s
+            oldest_sample : Optional[Sample] = self.get_oldest_sample()
             self.samples.remove(oldest_sample)
             self.samples.append(sample)
 
-    def update_multiple_items(self, samples: List[Sample]):
+    def set_multiple_samples(self, samples: List[Sample]):
         for sam in samples:
-            # check subsample belongs to correct group and duration before adding
             if sam.group == self.group and sam.duration == self.duration:
-                self.update_one_item(sam)
+                self.set_new_sample(sam)
 
     def get_list_len(self):
         return len(self.samples)
@@ -54,10 +52,9 @@ class M:
         samples = df.groupby('Duration').apply(
                         lambda group: [Sample(row['month'], row['M'], row['Rnpd'], row['Duration'])
                         for index, row in group.iterrows()])
-        # Iterate over unique durations in the DataFrame.
-        for dur in sorted(df['Duration'].unique()):
-            # Initialize durations dictionary if empty.
-            if not dur in self.durations.keys():
-                self.durations[dur] = Duration(self.group, dur, samples.loc[dur])
-            else:
-                self.durations[dur].update_multiple_items(samples.loc[dur])
+        if not df.empty:
+            for duration_index in sorted(df['Duration'].unique()):
+                if not duration_index in self.durations.keys():
+                    self.durations[duration_index] = Duration(self.group, duration_index, samples.loc[duration_index])
+                else:
+                    self.durations[duration_index].set_multiple_samples(samples.loc[duration_index])
